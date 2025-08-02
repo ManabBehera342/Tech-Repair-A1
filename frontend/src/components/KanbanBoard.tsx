@@ -266,7 +266,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
               ))}
             </div>
           </div>
-        );
+        ); 
       })}
     </div>
   );
