@@ -3,8 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { 
-  User, Mail, Phone, MapPin, Calendar, Upload, CheckCircle,
-  ArrowLeft, ArrowRight, Camera, X, AlertCircle, FileText
+  User, 
+  Mail, 
+  Phone, 
+  MapPin, 
+  Calendar, 
+  Upload, 
+  CheckCircle,
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  X,
+  AlertCircle,
+  FileText
 } from 'lucide-react';
 
 interface ServiceRequest {
@@ -52,6 +63,7 @@ const ServiceRequestForm: React.FC = () => {
     }
   });
 
+  // Predefined cost mapping per issue (in your currency, e.g., ₹)
   const issueCostMap: Record<string, number> = {
     'Device not turning on': 1500,
     'Charging issues': 800,
@@ -65,6 +77,7 @@ const ServiceRequestForm: React.FC = () => {
     'Button malfunction': 700,
   };
 
+  // Calculate total estimated cost based on selected issues
   const estimatedCost = useMemo(() => {
     return formData.problemDetails.issues.reduce((total, issue) => {
       const cost = issueCostMap[issue] || 0;
@@ -114,6 +127,7 @@ const ServiceRequestForm: React.FC = () => {
 
   const handleFileUpload = (files: FileList | null) => {
     if (!files) return;
+    
     const newFiles = Array.from(files).slice(0, 4 - formData.problemDetails.photos.length);
     setFormData(prev => ({
       ...prev,
@@ -163,29 +177,25 @@ const ServiceRequestForm: React.FC = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  const uploadPhotos = async (serialNumber: string, photos: File[]) => {
-    const token = localStorage.getItem('token');
-    const form = new FormData();
-    photos.forEach(photo => form.append('photos', photo));
-    await fetch(`http://localhost:3000/upload-photos/${serialNumber}`, {
-      method: 'POST',
-      headers: { Authorization: token ? `Bearer ${token}` : '' },
-      body: form,
-    });
-  };
-
   const submitRequest = async () => {
     try {
       const token = localStorage.getItem('token');
+
+      let photoFileNames: string[] = [];
+      if (formData.problemDetails.photos?.length) {
+        photoFileNames = formData.problemDetails.photos.map((file) => file.name);
+      }
+
       const reqBody = {
         customerName: formData.contactDetails.name,
         serialNumber: formData.productDetails.serialNumber,
         productDetails: `${formData.productDetails.type} ${formData.productDetails.model}`,
         purchaseDate: formData.productDetails.purchaseDate,
-        photos: [],
+        photos: photoFileNames,
         faultDescription: `[${formData.problemDetails.issues.join(', ')}] ${formData.problemDetails.description}`,
-        estimatedCost: estimatedCost.toString(),
+        estimatedCost: estimatedCost.toString(),  // send calculated cost as string
       };
+
       const response = await fetch('http://localhost:3000/service-requests', {
         method: 'POST',
         headers: {
@@ -194,32 +204,25 @@ const ServiceRequestForm: React.FC = () => {
         },
         body: JSON.stringify(reqBody),
       });
+
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
         throw new Error(error?.error || 'Failed to submit request');
       }
-      if (formData.problemDetails.photos.length && formData.productDetails.serialNumber) {
-        try {
-          await uploadPhotos(formData.productDetails.serialNumber, formData.problemDetails.photos);
-        } catch {
-          addNotification({
-            type: 'warning',
-            title: 'Photo Upload Failed',
-            message: 'Your service request was submitted, but there was a problem uploading your attachments.',
-          });
-        }
-      }
+
       addNotification({
         type: 'success',
         title: 'Service Request Submitted!',
         message: `Your request has been recorded. We'll contact you soon.`,
         duration: 0
       });
+
       setFormData({
         contactDetails: { name: '', email: '', phone: '', address: '' },
         productDetails: { type: '', model: '', serialNumber: '', purchaseDate: '' },
         problemDetails: { description: '', issues: [], photos: [] }
       });
+
       setTimeout(() => {
         navigate('/');
       }, 2000);
@@ -238,6 +241,7 @@ const ServiceRequestForm: React.FC = () => {
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Contact Information</h3>
+            
             <div className="grid md:grid-cols-2 gap-6">
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -250,6 +254,7 @@ const ServiceRequestForm: React.FC = () => {
                   required
                 />
               </div>
+
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -261,6 +266,7 @@ const ServiceRequestForm: React.FC = () => {
                   required
                 />
               </div>
+
               <div className="relative">
                 <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -272,6 +278,7 @@ const ServiceRequestForm: React.FC = () => {
                   required
                 />
               </div>
+
               <div className="relative">
                 <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                 <textarea
@@ -285,13 +292,17 @@ const ServiceRequestForm: React.FC = () => {
             </div>
           </div>
         );
+
       case 2:
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Product Information</h3>
+            
             <div className="grid md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Product Type *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Product Type *
+                </label>
                 <select
                   value={formData.productDetails.type}
                   onChange={(e) => handleInputChange('productDetails', 'type', e.target.value)}
@@ -304,8 +315,11 @@ const ServiceRequestForm: React.FC = () => {
                   ))}
                 </select>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Model *</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Model *
+                </label>
                 <input
                   type="text"
                   placeholder="Product Model"
@@ -315,8 +329,11 @@ const ServiceRequestForm: React.FC = () => {
                   required
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Serial Number</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Serial Number
+                </label>
                 <input
                   type="text"
                   placeholder="Serial Number"
@@ -325,6 +342,7 @@ const ServiceRequestForm: React.FC = () => {
                   className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
+
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                 <input
@@ -337,12 +355,16 @@ const ServiceRequestForm: React.FC = () => {
             </div>
           </div>
         );
+
       case 3:
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Problem Description</h3>
+            
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Describe the Problem *</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Describe the Problem *
+              </label>
               <textarea
                 placeholder="Please describe the issue in detail..."
                 value={formData.problemDetails.description}
@@ -352,8 +374,11 @@ const ServiceRequestForm: React.FC = () => {
                 required
               />
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Common Issues (Select all that apply) *</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                Common Issues (Select all that apply) *
+              </label>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 {commonIssues.map(issue => (
                   <button
@@ -371,8 +396,11 @@ const ServiceRequestForm: React.FC = () => {
                 ))}
               </div>
             </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Photos/Videos (Up to 4 files)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                Photos/Videos (Up to 4 files)
+              </label>
               <div className="space-y-4">
                 <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-6 text-center hover:border-blue-500 transition-colors duration-200">
                   <input
@@ -396,6 +424,7 @@ const ServiceRequestForm: React.FC = () => {
                     </span>
                   </label>
                 </div>
+
                 {formData.problemDetails.photos.length > 0 && (
                   <div className="grid grid-cols-2 gap-4">
                     {formData.problemDetails.photos.map((file, index) => (
@@ -426,10 +455,12 @@ const ServiceRequestForm: React.FC = () => {
             </div>
           </div>
         );
+
       case 4:
         return (
           <div className="space-y-6">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Review Your Request</h3>
+            
             <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-6 space-y-4">
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Contact Details</h4>
@@ -437,6 +468,7 @@ const ServiceRequestForm: React.FC = () => {
                   {formData.contactDetails.name} - {formData.contactDetails.email} - {formData.contactDetails.phone}
                 </p>
               </div>
+
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Product</h4>
                 <p className="text-gray-600 dark:text-gray-400">
@@ -444,6 +476,7 @@ const ServiceRequestForm: React.FC = () => {
                   {formData.productDetails.serialNumber && ` (SN: ${formData.productDetails.serialNumber})`}
                 </p>
               </div>
+
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Issues</h4>
                 <div className="flex flex-wrap gap-2">
@@ -454,10 +487,12 @@ const ServiceRequestForm: React.FC = () => {
                   ))}
                 </div>
               </div>
+
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Description</h4>
                 <p className="text-gray-600 dark:text-gray-400">{formData.problemDetails.description}</p>
               </div>
+
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">
                   Attachments ({formData.problemDetails.photos.length})
@@ -480,6 +515,8 @@ const ServiceRequestForm: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Display estimated cost instead of input */}
               <div>
                 <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Estimated Cost</h4>
                 <p className="text-gray-900 dark:text-gray-300 font-semibold text-lg">
@@ -487,6 +524,7 @@ const ServiceRequestForm: React.FC = () => {
                 </p>
               </div>
             </div>
+
             <button
               onClick={submitRequest}
               className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-4 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
@@ -496,6 +534,7 @@ const ServiceRequestForm: React.FC = () => {
             </button>
           </div>
         );
+
       default:
         return null;
     }
@@ -503,6 +542,7 @@ const ServiceRequestForm: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-blue-900">
+      {/* Header */}
       <header className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -527,7 +567,9 @@ const ServiceRequestForm: React.FC = () => {
           </div>
         </div>
       </header>
+
       <div className="max-w-4xl mx-auto px-6 py-8">
+        {/* Progress Steps */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             {steps.map((step, index) => (
@@ -553,8 +595,12 @@ const ServiceRequestForm: React.FC = () => {
             ))}
           </div>
         </div>
+
+        {/* Form Content */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {renderStepContent()}
+
+          {/* Navigation Buttons */}
           {currentStep < 4 && (
             <div className="flex justify-between mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
               <button
@@ -565,6 +611,7 @@ const ServiceRequestForm: React.FC = () => {
                 <ArrowLeft className="w-4 h-4" />
                 <span>Previous</span>
               </button>
+
               <button
                 onClick={nextStep}
                 className="flex items-center space-x-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"

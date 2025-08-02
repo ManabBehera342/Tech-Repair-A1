@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { BarChart3, PieChart, TrendingDown, AlertTriangle, FileText, Plus, Filter } from 'lucide-react';
+import { 
+  BarChart3, 
+  PieChart, 
+  TrendingDown, 
+  AlertTriangle, 
+  FileText, 
+  Plus, 
+  Filter 
+} from 'lucide-react';
 
 interface RootCause {
   id: string;
@@ -84,7 +92,6 @@ const RCAModule: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <div className="flex items-center justify-between">
@@ -94,7 +101,6 @@ const RCAModule: React.FC = () => {
                 Analyze recurring issues and their underlying causes
               </p>
             </div>
-            
             <div className="flex items-center space-x-4">
               <button className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors">
                 <FileText className="w-4 h-4" />
@@ -106,7 +112,6 @@ const RCAModule: React.FC = () => {
       </header>
 
       <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Tab Navigation */}
         <div className="flex space-x-1 bg-gray-100 dark:bg-gray-700 rounded-lg p-1 mb-8">
           {[
             { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -115,7 +120,7 @@ const RCAModule: React.FC = () => {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id as 'overview' | 'analysis' | 'add')}
               className={`flex items-center space-x-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                 activeTab === tab.id
                   ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
@@ -128,10 +133,8 @@ const RCAModule: React.FC = () => {
           ))}
         </div>
 
-        {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div className="space-y-8">
-            {/* Summary Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
                 <div className="flex items-center justify-between">
@@ -186,7 +189,6 @@ const RCAModule: React.FC = () => {
               </div>
             </div>
 
-            {/* Top Issues Chart */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
               <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">Top Issues by Frequency</h3>
               <div className="space-y-4">
@@ -195,8 +197,8 @@ const RCAModule: React.FC = () => {
                   .slice(0, 5)
                   .map((cause, index) => {
                     const maxFreq = Math.max(...rootCauses.map(rc => rc.frequency));
-                    const percentage = (cause.frequency / maxFreq) * 100;
-                    
+                    const percentage = maxFreq ? (cause.frequency / maxFreq) * 100 : 0;
+
                     return (
                       <div key={cause.id} className="flex items-center space-x-4">
                         <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
@@ -209,10 +211,10 @@ const RCAModule: React.FC = () => {
                           </div>
                           <div className="flex items-center space-x-2">
                             <div className="flex-1 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                              <div 
+                              <div
                                 className="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full transition-all duration-300"
                                 style={{ width: `${percentage}%` }}
-                              ></div>
+                              />
                             </div>
                             <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(cause.severity)}`}>
                               {cause.severity}
@@ -227,16 +229,14 @@ const RCAModule: React.FC = () => {
           </div>
         )}
 
-        {/* Detailed Analysis Tab */}
-        {activeView === 'analysis' && (
+        {activeTab === 'analysis' && (
           <div className="space-y-6">
-            {/* Filters */}
             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6">
               <div className="flex items-center space-x-4">
                 <Filter className="w-5 h-5 text-gray-400" />
                 <select
                   value={filterSeverity}
-                  onChange={(e) => setFilterSeverity(e.target.value)}
+                  onChange={e => setFilterSeverity(e.target.value)}
                   className="py-2 px-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="all">All Severities</option>
@@ -244,10 +244,9 @@ const RCAModule: React.FC = () => {
                   <option value="medium">Medium</option>
                   <option value="low">Low</option>
                 </select>
-                
                 <select
                   value={filterProduct}
-                  onChange={(e) => setFilterProduct(e.target.value)}
+                  onChange={e => setFilterProduct(e.target.value)}
                   className="py-2 px-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="all">All Products</option>
@@ -258,7 +257,6 @@ const RCAModule: React.FC = () => {
               </div>
             </div>
 
-            {/* RCA Cards */}
             <div className="grid gap-6">
               {filteredCauses.map(cause => (
                 <div key={cause.id} className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
@@ -268,15 +266,11 @@ const RCAModule: React.FC = () => {
                         {cause.issue}
                       </h3>
                       <div className="flex items-center space-x-4">
-                        <span className="text-sm text-gray-600 dark:text-gray-400">
-                          {cause.productType}
-                        </span>
+                        <span className="text-sm text-gray-600 dark:text-gray-400">{cause.productType}</span>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getSeverityColor(cause.severity)}`}>
                           {cause.severity} severity
                         </span>
-                        <span className="text-sm text-gray-600 dark:text-gray-400">
-                          {cause.frequency} occurrences
-                        </span>
+                        <span className="text-sm text-gray-600 dark:text-gray-400">{cause.frequency} occurrences</span>
                       </div>
                     </div>
                   </div>
@@ -284,30 +278,23 @@ const RCAModule: React.FC = () => {
                   <div className="grid md:grid-cols-2 gap-6">
                     <div>
                       <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Root Cause</h4>
-                      <p className="text-gray-700 dark:text-gray-300 text-sm mb-4">
-                        {cause.cause}
-                      </p>
-                      
+                      <p className="text-gray-700 dark:text-gray-300 text-sm mb-4">{cause.cause}</p>
+
                       <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Solution</h4>
-                      <p className="text-gray-700 dark:text-gray-300 text-sm">
-                        {cause.solution}
-                      </p>
+                      <p className="text-gray-700 dark:text-gray-300 text-sm">{cause.solution}</p>
                     </div>
 
                     <div>
                       <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Impact Areas</h4>
                       <div className="space-y-2 mb-4">
-                        {cause.impact.map((impact, index) => (
-                          <div key={index} className="flex items-center space-x-2">
+                        {cause.impact.map((impact, idx) => (
+                          <div key={idx} className="flex items-center space-x-2">
                             <div className="w-2 h-2 bg-red-500 rounded-full"></div>
                             <span className="text-sm text-gray-700 dark:text-gray-300">{impact}</span>
                           </div>
                         ))}
                       </div>
-                      
-                      <p className="text-xs text-gray-500">
-                        Last occurrence: {new Date(cause.lastOccurrence).toLocaleDateString()}
-                      </p>
+                      <p className="text-xs text-gray-500">Last occurrence: {new Date(cause.lastOccurrence).toLocaleDateString()}</p>
                     </div>
                   </div>
                 </div>
@@ -316,11 +303,9 @@ const RCAModule: React.FC = () => {
           </div>
         )}
 
-        {/* Add New RCA Tab */}
         {activeTab === 'add' && (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-8">
             <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-6">Add New Root Cause Analysis</h3>
-            
             <form className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
                 <div>
@@ -333,19 +318,19 @@ const RCAModule: React.FC = () => {
                     className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Product Type
                   </label>
-                  <select className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select
+                    className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
                     <option value="">Select Product Type</option>
                     {productTypes.map(product => (
                       <option key={product} value={product}>{product}</option>
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Frequency
@@ -356,12 +341,13 @@ const RCAModule: React.FC = () => {
                     className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Severity Level
                   </label>
-                  <select className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select
+                    className="w-full py-3 px-4 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
                     <option value="">Select Severity</option>
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
