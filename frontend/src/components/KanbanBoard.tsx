@@ -74,7 +74,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
     async function fetchTickets() {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:3000/service-requests', {
+        const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/service-requests`, {
           headers: {
             Authorization: token ? `Bearer ${token}` : '',
           }
@@ -113,7 +113,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
         )
       );
 
-      const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/service-requests/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +157,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
       const patchBody: Partial<Record<string, string>> = {};
       patchBody[field] = value;
 
-      const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
+      const res = await fetch(`${import.meta.env.VITE_BACKEND_URL}/service-requests/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

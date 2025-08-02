@@ -167,7 +167,7 @@ const ServiceRequestForm: React.FC = () => {
     const token = localStorage.getItem('token');
     const form = new FormData();
     photos.forEach(photo => form.append('photos', photo));
-    await fetch(`http://localhost:3000/upload-photos/${serialNumber}`, {
+    await fetch(`${import.meta.env.VITE_BACKEND_URL}/upload-photos/${serialNumber}`, {
       method: 'POST',
       headers: { Authorization: token ? `Bearer ${token}` : '' },
       body: form,
@@ -186,7 +186,7 @@ const ServiceRequestForm: React.FC = () => {
         faultDescription: `[${formData.problemDetails.issues.join(', ')}] ${formData.problemDetails.description}`,
         estimatedCost: estimatedCost.toString(),
       };
-      const response = await fetch('http://localhost:3000/service-requests', {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/service-requests`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
