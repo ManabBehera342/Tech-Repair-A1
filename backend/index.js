@@ -44,7 +44,27 @@ const {
 // --------- APP & MIDDLEWARE SETUP ---------
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: '*' })); // Consider restricting in production
+const allowedOrigins = [
+  'http://localhost:3000',  // or your actual local frontend port
+  'http://localhost:5173',  // common Vite default
+  'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app', // your deployed frontend
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like Postman or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      return callback(
+        new Error('CORS policy: Origin not allowed - ' + origin)
+      );
+    }
+  },
+  credentials: true,
+}));
+ // Consider restricting in production
 
 // --------- MONGODB USER SCHEMA ---------
 const userSchema = new mongoose.Schema(
