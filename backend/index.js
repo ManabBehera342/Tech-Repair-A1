@@ -10,10 +10,28 @@ const { google } = require('googleapis');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
+const { GoogleGenAI } = require('@google/genai'); // Use official SDK
 
 const app = express();
 app.use(express.json());
 app.use(cors());
+
+// Warn if required env variables are missing
+const requiredEnvs = [
+  'PORT',
+  'MONGODB_URI',
+  'JWT_SECRET',
+  'SPREADSHEET_ID',
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'CLOUDINARY_API_SECRET',
+  'GEMINI_API_KEY',
+];
+requiredEnvs.forEach((envVar) => {
+  if (!process.env[envVar]) {
+    console.warn(`Warning: Environment variable ${envVar} is not set.`);
+  }
+});
 
 const {
   PORT,
@@ -51,12 +69,20 @@ mongoose
     process.exit(1);
   });
 
-// Google Sheets API Client Setup
-const credentials = JSON.parse(fs.readFileSync('./service-account.json', 'utf8'));
+// Google Sheets API Client Setup with error handling
+let credentials;
+try {
+  credentials = JSON.parse(fs.readFileSync('./service-account.json', 'utf8'));
+} catch (error) {
+  console.error('Failed to read service-account.json:', error);
+  process.exit(1);
+}
+
 const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
+
 const sheets = google.sheets({ version: 'v4', auth });
 const spreadsheetId = SPREADSHEET_ID;
 
@@ -94,7 +120,7 @@ async function appendToSheet(tabName, values) {
   });
 }
 
-// Upload buffer to Cloudinary
+// Upload buffer to Cloudinary helper
 function uploadToCloudinary(buffer) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream({ folder: 'service-requests' }, (error, result) => {
@@ -105,7 +131,7 @@ function uploadToCloudinary(buffer) {
   });
 }
 
-// Signup
+// Signup Route
 app.post('/signup', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -128,7 +154,7 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-// Login
+// Login Route
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -153,12 +179,12 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Logout (stateless)
+// Logout Route (stateless)
 app.post('/logout', (req, res) =>
   res.json({ message: 'Logged out successfully. Please remove token from client.' })
 );
 
-// Get Profile
+// Profile Route
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
@@ -212,7 +238,7 @@ app.get('/service-requests', authenticateToken, async (req, res) => {
 
     const tickets = rows.map((row, idx) => ({
       id: (idx + 1).toString(),
-      ticketNumber: row[1] || `TICKET-${idx + 1}`,          // SERIAL NUMBER as ID!
+      ticketNumber: row[1] || `TICKET-${idx + 1}`, // SERIAL NUMBER as ID!
       customerName: row[0] || '',
       serialNumber: row[1] || '',
       productType: row[2] || '',
@@ -249,7 +275,6 @@ app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res)
 
     const rows = resp.data.values || [];
 
-    // -------- MATCH ON row[1] (SERIAL NUMBER)
     const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
 
@@ -287,31 +312,26 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
     if (!files || files.length === 0)
       return res.status(400).json({ error: 'No photos uploaded' });
 
-    // Upload each photo to Cloudinary
     const uploads = files.map((file) => uploadToCloudinary(file.buffer));
     const urls = await Promise.all(uploads);
 
-    // Fetch existing sheet data
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: 'ServiceRequests!A2:L',
     });
 
     const rows = resp.data.values || [];
-    // --------- MATCH ON row[1] (SERIAL NUMBER)
     const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
 
     const row = rows[rowIndex];
 
-    // Merge old and new photo URLs
     const existingPhotos = row[4] ? row[4].split('; ') : [];
     const allPhotos = [...existingPhotos, ...urls];
     row[4] = allPhotos.join('; ');
 
     row[11] = new Date().toISOString();
 
-    // Update the row in Google Sheets
     const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -327,7 +347,29 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
   }
 });
 
-// Start server
+// Gemini Chat endpoint using official @google/genai SDK
+const ai = new GoogleGenAI({}); // picks API key from GEMINI_API_KEY env var
+
+app.post('/api/gemini-chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ reply: 'Message required' });
+
+    // Use Gemini 2.5 Flash model for fastest responses
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: message,
+      // Optionally, for speed/cost, you could disable "thinking" here
+      // config: { thinkingConfig: { thinkingBudget: 0 } }
+    });
+
+    res.json({ reply: response.text });
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    res.status(500).json({ reply: 'Error communicating with Gemini API' });
+  }
+});
+
 app.listen(PORT || 3000, () => {
   console.log(`Server running on port ${PORT || 3000}`);
 });
