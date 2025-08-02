@@ -51,7 +51,7 @@ const ChatBot: React.FC = () => {
     setInputText('');
 
     try {
-      const response = await fetch('http://localhost:3000/api/gemini-chat', {
+      const response = await fetch('/api/gemini-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),

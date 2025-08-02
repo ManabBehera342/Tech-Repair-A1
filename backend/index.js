@@ -5,18 +5,13 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
-const fs = require('fs');
 const { google } = require('googleapis');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
-const { GoogleGenAI } = require('@google/genai'); // Use official SDK
+const { GoogleGenAI } = require('@google/genai');
 
-const app = express();
-app.use(express.json());
-app.use(cors());
-
-// Warn if required env variables are missing
+// --------- ENVIRONMENT VALIDATION ---------
 const requiredEnvs = [
   'PORT',
   'MONGODB_URI',
@@ -26,12 +21,14 @@ const requiredEnvs = [
   'CLOUDINARY_API_KEY',
   'CLOUDINARY_API_SECRET',
   'GEMINI_API_KEY',
+  'SERVICE_ACCOUNT_JSON', // Add this!
 ];
-requiredEnvs.forEach((envVar) => {
-  if (!process.env[envVar]) {
-    console.warn(`Warning: Environment variable ${envVar} is not set.`);
-  }
-});
+
+const missingEnvs = requiredEnvs.filter(envVar => !process.env[envVar]);
+if (missingEnvs.length > 0) {
+  console.error('Missing required environment variables:', missingEnvs.join(', '));
+  process.exit(1);
+}
 
 const {
   PORT,
@@ -41,9 +38,15 @@ const {
   CLOUDINARY_CLOUD_NAME,
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
+  SERVICE_ACCOUNT_JSON, // NEW - from Render env
 } = process.env;
 
-// MongoDB User Schema and Model
+// --------- APP & MIDDLEWARE SETUP ---------
+const app = express();
+app.use(express.json());
+app.use(cors({ origin: '*' })); // Consider restricting in production
+
+// --------- MONGODB USER SCHEMA ---------
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
@@ -57,24 +60,22 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
 const User = mongoose.model('User', userSchema);
 
-// Connect MongoDB
-mongoose
-  .connect(MONGODB_URI)
+// --------- MONGODB CONNECTION ---------
+mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => {
     console.error('MongoDB connection error:', err);
     process.exit(1);
   });
 
-// Google Sheets API Client Setup with error handling
+// --------- GOOGLE SHEETS SERVICE ACCOUNT (from env) ---------
 let credentials;
 try {
-  credentials = JSON.parse(fs.readFileSync('./service-account.json', 'utf8'));
+  credentials = JSON.parse(SERVICE_ACCOUNT_JSON);
 } catch (error) {
-  console.error('Failed to read service-account.json:', error);
+  console.error('Failed to parse service account JSON. Check SERVICE_ACCOUNT_JSON env:', error);
   process.exit(1);
 }
 
@@ -82,21 +83,20 @@ const auth = new google.auth.GoogleAuth({
   credentials,
   scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
-
 const sheets = google.sheets({ version: 'v4', auth });
 const spreadsheetId = SPREADSHEET_ID;
 
-// Cloudinary Config
+// --------- CLOUDINARY CONFIG ---------
 cloudinary.config({
   cloud_name: CLOUDINARY_CLOUD_NAME,
   api_key: CLOUDINARY_API_KEY,
   api_secret: CLOUDINARY_API_SECRET,
 });
 
-// Multer setup for in-memory upload
+// --------- MULTER: MEMORY STORAGE ---------
 const upload = multer({ storage: multer.memoryStorage() });
 
-// JWT Authentication Middleware
+// --------- JWT AUTH MIDDLEWARE ---------
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ error: 'Authorization header missing' });
@@ -109,9 +109,8 @@ function authenticateToken(req, res, next) {
   });
 }
 
-// Utility: Append rows to Google Sheets
+// --------- HELPERS ---------
 async function appendToSheet(tabName, values) {
-  const client = await auth.getClient();
   await sheets.spreadsheets.values.append({
     spreadsheetId,
     range: tabName,
@@ -120,7 +119,6 @@ async function appendToSheet(tabName, values) {
   });
 }
 
-// Upload buffer to Cloudinary helper
 function uploadToCloudinary(buffer) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream({ folder: 'service-requests' }, (error, result) => {
@@ -131,7 +129,7 @@ function uploadToCloudinary(buffer) {
   });
 }
 
-// Signup Route
+// --------- ROUTES ---------
 app.post('/signup', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -154,7 +152,6 @@ app.post('/signup', async (req, res) => {
   }
 });
 
-// Login Route
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -171,7 +168,6 @@ app.post('/login', async (req, res) => {
       JWT_SECRET,
       { expiresIn: '8h' }
     );
-
     res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
   } catch (err) {
     console.error('Login error:', err);
@@ -179,29 +175,24 @@ app.post('/login', async (req, res) => {
   }
 });
 
-// Logout Route (stateless)
 app.post('/logout', (req, res) =>
   res.json({ message: 'Logged out successfully. Please remove token from client.' })
 );
 
-// Profile Route
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
 
-// Add Service Request
 app.post('/service-requests', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'customer')
       return res.status(403).json({ error: 'Only customers can create service requests' });
 
     const { customerName, serialNumber, productDetails, purchaseDate, photos, faultDescription } = req.body;
-
     if (!customerName || !serialNumber || !productDetails || !purchaseDate || !faultDescription)
       return res.status(400).json({ error: 'Missing required fields' });
 
     const photoString = Array.isArray(photos) ? photos.join('; ') : '';
-
     const row = [
       customerName,
       serialNumber,
@@ -216,7 +207,6 @@ app.post('/service-requests', authenticateToken, async (req, res) => {
       '', // repairDetails
       new Date().toISOString(),
     ];
-
     await appendToSheet('ServiceRequests', [row]);
 
     res.status(201).json({ message: 'Request saved to Google Sheets' });
@@ -226,19 +216,16 @@ app.post('/service-requests', authenticateToken, async (req, res) => {
   }
 });
 
-// Fetch Service Requests
 app.get('/service-requests', authenticateToken, async (req, res) => {
   try {
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: 'ServiceRequests!A2:L',
     });
-
     const rows = resp.data.values || [];
-
     const tickets = rows.map((row, idx) => ({
       id: (idx + 1).toString(),
-      ticketNumber: row[1] || `TICKET-${idx + 1}`, // SERIAL NUMBER as ID!
+      ticketNumber: row[1] || `TICKET-${idx + 1}`,
       customerName: row[0] || '',
       serialNumber: row[1] || '',
       productType: row[2] || '',
@@ -254,7 +241,6 @@ app.get('/service-requests', authenticateToken, async (req, res) => {
       photos: row[4] ? row[4].split('; ') : [],
       description: row[5] || '',
     }));
-
     res.json({ tickets });
   } catch (err) {
     console.error(err);
@@ -262,22 +248,17 @@ app.get('/service-requests', authenticateToken, async (req, res) => {
   }
 });
 
-// Update Service Request - match on serial number (column B)
 app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res) => {
   try {
     const { ticketNumber } = req.params;
     const updates = req.body;
-
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: 'ServiceRequests!A2:L',
     });
-
     const rows = resp.data.values || [];
-
     const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
-
     const row = rows[rowIndex];
 
     if (updates.status !== undefined) row[6] = updates.status;
@@ -295,7 +276,6 @@ app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res)
       valueInputOption: 'RAW',
       requestBody: { values: [row] },
     });
-
     res.json({ message: 'Ticket updated successfully' });
   } catch (err) {
     console.error(err);
@@ -303,7 +283,6 @@ app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res)
   }
 });
 
-// Upload Photos Endpoint - match on serial number (column B)
 app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos'), async (req, res) => {
   try {
     const { ticketNumber } = req.params;
@@ -323,7 +302,6 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
     const rows = resp.data.values || [];
     const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
-
     const row = rows[rowIndex];
 
     const existingPhotos = row[4] ? row[4].split('; ') : [];
@@ -331,7 +309,6 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
     row[4] = allPhotos.join('; ');
 
     row[11] = new Date().toISOString();
-
     const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -339,7 +316,6 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
       valueInputOption: 'RAW',
       requestBody: { values: [row] },
     });
-
     res.json({ message: 'Photos uploaded and attached', photoUrls: urls });
   } catch (err) {
     console.error(err);
@@ -347,20 +323,17 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
   }
 });
 
-// Gemini Chat endpoint using official @google/genai SDK
-const ai = new GoogleGenAI({}); // picks API key from GEMINI_API_KEY env var
+// --------- GEMINI AI CHAT ENDPOINT ---------
+const ai = new GoogleGenAI({}); // GEMINI_API_KEY should be set in env
 
 app.post('/api/gemini-chat', async (req, res) => {
   try {
     const { message } = req.body;
     if (!message) return res.status(400).json({ reply: 'Message required' });
 
-    // Use Gemini 2.5 Flash model for fastest responses
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: message,
-      // Optionally, for speed/cost, you could disable "thinking" here
-      // config: { thinkingConfig: { thinkingBudget: 0 } }
     });
 
     res.json({ reply: response.text });
