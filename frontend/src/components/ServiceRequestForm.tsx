@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -63,6 +63,28 @@ const ServiceRequestForm: React.FC = () => {
     }
   });
 
+  // Predefined cost mapping per issue (in your currency, e.g., ₹)
+  const issueCostMap: Record<string, number> = {
+    'Device not turning on': 1500,
+    'Charging issues': 800,
+    'Overheating': 1200,
+    'Physical damage': 2000,
+    'Software malfunction': 1000,
+    'Connectivity problems': 900,
+    'Performance degradation': 1100,
+    'Strange noises': 1300,
+    'Display issues': 1800,
+    'Button malfunction': 700,
+  };
+
+  // Calculate total estimated cost based on selected issues
+  const estimatedCost = useMemo(() => {
+    return formData.problemDetails.issues.reduce((total, issue) => {
+      const cost = issueCostMap[issue] || 0;
+      return total + cost;
+    }, 0);
+  }, [formData.problemDetails.issues]);
+
   const productTypes = [
     'Energizer Power Bank',
     'Gate Motor Controller',
@@ -72,18 +94,7 @@ const ServiceRequestForm: React.FC = () => {
     'Other'
   ];
 
-  const commonIssues = [
-    'Device not turning on',
-    'Charging issues',
-    'Overheating',
-    'Physical damage',
-    'Software malfunction',
-    'Connectivity problems',
-    'Performance degradation',
-    'Strange noises',
-    'Display issues',
-    'Button malfunction'
-  ];
+  const commonIssues = Object.keys(issueCostMap);
 
   const steps = [
     { number: 1, title: 'Contact Details', icon: User },
@@ -167,72 +178,62 @@ const ServiceRequestForm: React.FC = () => {
   };
 
   const submitRequest = async () => {
-  try {
-    // Get JWT token for authorization
-    const token = localStorage.getItem('token');
+    try {
+      const token = localStorage.getItem('token');
 
-    // Prepare photos: upload them if the backend accepts files, or send as URLs/data URLs if not.
-    // Your backend expects the `photos` field as an array of string URLs or filenames.
-    // For now, we'll just send filenames (since your backend expects strings joined via "; ")
+      let photoFileNames: string[] = [];
+      if (formData.problemDetails.photos?.length) {
+        photoFileNames = formData.problemDetails.photos.map((file) => file.name);
+      }
 
-    let photoFileNames: string[] = [];
-    if (formData.problemDetails.photos?.length) {
-      // If you have an upload endpoint, you should upload files first and collect URLs
-      // For now, we'll just use file names as dummy placeholders
-      photoFileNames = formData.problemDetails.photos.map((file) => file.name);
+      const reqBody = {
+        customerName: formData.contactDetails.name,
+        serialNumber: formData.productDetails.serialNumber,
+        productDetails: `${formData.productDetails.type} ${formData.productDetails.model}`,
+        purchaseDate: formData.productDetails.purchaseDate,
+        photos: photoFileNames,
+        faultDescription: `[${formData.problemDetails.issues.join(', ')}] ${formData.problemDetails.description}`,
+        estimatedCost: estimatedCost.toString(),  // send calculated cost as string
+      };
+
+      const response = await fetch('http://localhost:3000/service-requests', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(reqBody),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error?.error || 'Failed to submit request');
+      }
+
+      addNotification({
+        type: 'success',
+        title: 'Service Request Submitted!',
+        message: `Your request has been recorded. We'll contact you soon.`,
+        duration: 0
+      });
+
+      setFormData({
+        contactDetails: { name: '', email: '', phone: '', address: '' },
+        productDetails: { type: '', model: '', serialNumber: '', purchaseDate: '' },
+        problemDetails: { description: '', issues: [], photos: [] }
+      });
+
+      setTimeout(() => {
+        navigate('/');
+      }, 2000);
+    } catch (error) {
+      addNotification({
+        type: 'error',
+        title: 'Submission Failed',
+        message: 'There was an error submitting your request. Please try again.'
+      });
     }
-
-    // Prepare the request body for backend API
-    const reqBody = {
-      customerName: formData.contactDetails.name,
-      serialNumber: formData.productDetails.serialNumber,
-      productDetails: `${formData.productDetails.type} ${formData.productDetails.model}`,
-      purchaseDate: formData.productDetails.purchaseDate,
-      photos: photoFileNames, // send array (backend will join with '; ')
-      faultDescription: `[${formData.problemDetails.issues.join(', ')}] ${formData.problemDetails.description}`,
-    };
-
-    const response = await fetch('http://localhost:3000/service-requests', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(reqBody),
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error?.error || 'Failed to submit request');
-    }
-
-    // Success!
-    addNotification({
-      type: 'success',
-      title: 'Service Request Submitted!',
-      message: `Your request has been recorded. We'll contact you soon.`,
-      duration: 0
-    });
-
-    // Reset form and navigate
-    setFormData({
-      contactDetails: { name: '', email: '', phone: '', address: '' },
-      productDetails: { type: '', model: '', serialNumber: '', purchaseDate: '' },
-      problemDetails: { description: '', issues: [], photos: [] }
-    });
-
-    setTimeout(() => {
-      navigate('/');
-    }, 2000);
-  } catch (error) {
-    addNotification({
-      type: 'error',
-      title: 'Submission Failed',
-      message: 'There was an error submitting your request. Please try again.'
-    });
-  }
-};
-
+  };
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -513,6 +514,14 @@ const ServiceRequestForm: React.FC = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              {/* Display estimated cost instead of input */}
+              <div>
+                <h4 className="font-semibold text-gray-900 dark:text-white mb-2">Estimated Cost</h4>
+                <p className="text-gray-900 dark:text-gray-300 font-semibold text-lg">
+                  ₹ {estimatedCost.toLocaleString()}
+                </p>
               </div>
             </div>
 

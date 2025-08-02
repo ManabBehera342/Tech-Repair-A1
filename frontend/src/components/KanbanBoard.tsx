@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, User, AlertCircle, Camera, MessageSquare } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
 
@@ -8,9 +8,20 @@ interface ServiceTicket {
   customerName: string;
   productType: string;
   issue: string;
-  status: 'new' | 'validation' | 'awaiting_dispatch' | 'assigned_epr' | 'estimate_provided' | 'under_repair' | 'ready_return' | 'closed';
+  status:
+    | 'new'
+    | 'validation'
+    | 'awaiting_dispatch'
+    | 'assigned_epr'
+    | 'estimate_provided'
+    | 'under_repair'
+    | 'ready_return'
+    | 'closed';
   priority: 'low' | 'medium' | 'high';
   assignedTo?: string;
+  estimatedCost?: string;
+  dispatchDetails?: string;
+  repairDetails?: string;
   createdAt: string;
   updatedAt: string;
   photos: string[];
@@ -38,10 +49,14 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300';
-      case 'medium': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
-      case 'low': return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
-      default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+      case 'high':
+        return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300';
+      case 'low':
+        return 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
     }
   };
 
@@ -49,7 +64,6 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
     const date = new Date(dateString);
     const now = new Date();
     const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
     if (diffInHours < 1) return 'Just now';
     if (diffInHours < 24) return `${diffInHours}h ago`;
     const diffInDays = Math.floor(diffInHours / 24);
@@ -62,11 +76,10 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
         const token = localStorage.getItem('token');
         const res = await fetch('http://localhost:3000/service-requests', {
           headers: {
-            'Authorization': token ? `Bearer ${token}` : '',
+            Authorization: token ? `Bearer ${token}` : '',
           }
         });
         if (!res.ok) throw new Error('Failed to fetch tickets');
-
         const data = await res.json();
         setTickets(data.tickets || data);
       } catch (error) {
@@ -87,27 +100,24 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     const ticketId = e.dataTransfer.getData('text/plain');
-
     try {
       const token = localStorage.getItem('token');
       const ticketToUpdate = tickets.find(t => t.id === ticketId);
       if (!ticketToUpdate) throw new Error('Ticket not found');
 
-      // Optimistically update UI
-      setTickets(prevTickets => 
-        prevTickets.map(ticket => 
-          ticket.id === ticketId 
+      setTickets(prevTickets =>
+        prevTickets.map(ticket =>
+          ticket.id === ticketId
             ? { ...ticket, status: newStatus as ServiceTicket['status'], updatedAt: new Date().toISOString() }
             : ticket
         )
       );
 
-      // Patch backend
       const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
+          Authorization: token ? `Bearer ${token}` : '',
         },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -124,47 +134,87 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
     }
   };
 
-  const assignTechnician = async (ticketId: string, technician: string) => {
+  // Patch update called onBlur, local state used for each input in each ticket card for smooth input experience.
+  const handleFieldChange = async (
+    ticketId: string,
+    field: 'assignedTo' | 'estimatedCost' | 'dispatchDetails' | 'repairDetails',
+    value: string
+  ) => {
     try {
       const token = localStorage.getItem('token');
+      const ticketToUpdate = tickets.find(t => t.id === ticketId);
+      if (!ticketToUpdate) throw new Error('Ticket not found');
 
+      // Optimistic state update
       setTickets(prevTickets =>
         prevTickets.map(ticket =>
           ticket.id === ticketId
-            ? { ...ticket, assignedTo: technician, updatedAt: new Date().toISOString() }
+            ? { ...ticket, [field]: value, updatedAt: new Date().toISOString() }
             : ticket
         )
       );
 
-      const ticketToUpdate = tickets.find(t => t.id === ticketId);
-      if (!ticketToUpdate) throw new Error('Ticket not found');
+      const patchBody: Partial<Record<string, string>> = {};
+      patchBody[field] = value;
 
       const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
+          Authorization: token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ assignedTo: technician }),
+        body: JSON.stringify(patchBody),
       });
 
-      if (!res.ok) throw new Error('Failed to assign technician');
+      if (!res.ok) throw new Error(`Failed to update ${field}`);
 
       addNotification({
         type: 'success',
-        title: 'Technician Assigned',
-        message: `Ticket assigned to ${technician}`
+        title: 'Update Successful',
+        message: `Ticket ${field} updated`,
       });
     } catch (error) {
-      addNotification({ type: 'error', title: 'Assignment Failed', message: (error as Error).message });
+      addNotification({ type: 'error', title: 'Update Failed', message: (error as Error).message });
     }
+  };
+
+  // Individual InputField component wrapped for managing local state and onBlur patching
+  const EditableField: React.FC<{
+    ticketId: string,
+    field: 'assignedTo' | 'estimatedCost' | 'dispatchDetails' | 'repairDetails',
+    value?: string,
+    type?: string,
+    placeholder?: string,
+  }> = ({ ticketId, field, value = '', type = 'text', placeholder }) => {
+    const [localValue, setLocalValue] = useState(value);
+
+    // Sync localValue if prop value changes (e.g. after ticket updates)
+    useEffect(() => {
+      setLocalValue(value);
+    }, [value]);
+
+    return (
+      <input
+        type={type}
+        min={type === 'number' ? 0 : undefined}
+        value={localValue}
+        onChange={e => setLocalValue(e.target.value)}
+        onBlur={() => {
+          if (localValue !== value) {
+            handleFieldChange(ticketId, field, localValue);
+          }
+        }}
+        className="w-full text-xs px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+        placeholder={placeholder}
+      />
+    );
   };
 
   return (
     <div className="flex space-x-6 overflow-x-auto pb-6">
       {columns.map(column => {
         const columnTickets = tickets.filter(ticket => ticket.status === column.id);
-        
+
         return (
           <div
             key={column.id}
@@ -236,10 +286,69 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
                     )}
                   </div>
 
+                  {/* Editable fields for service team */}
+                  {(ticket.status !== 'new' && ticket.status !== 'closed') && (
+                    <div className="mt-3 space-y-3 pt-3 border-t border-gray-200 dark:border-gray-600">
+                      {/* Assigned To */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Assigned To
+                        </label>
+                        <EditableField
+                          ticketId={ticket.id}
+                          field="assignedTo"
+                          value={ticket.assignedTo || ''}
+                          placeholder="Assign technician"
+                        />
+                      </div>
+
+                      {/* Estimated Cost */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Estimated Cost
+                        </label>
+                        <EditableField
+                          ticketId={ticket.id}
+                          field="estimatedCost"
+                          type="number"
+                          value={ticket.estimatedCost || ''}
+                          placeholder="Estimated repair cost"
+                        />
+                      </div>
+
+                      {/* Dispatch Details */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Dispatch Details
+                        </label>
+                        <EditableField
+                          ticketId={ticket.id}
+                          field="dispatchDetails"
+                          value={ticket.dispatchDetails || ''}
+                          placeholder="Details about dispatch"
+                        />
+                      </div>
+
+                      {/* Repair Details */}
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Repair Details
+                        </label>
+                        <EditableField
+                          ticketId={ticket.id}
+                          field="repairDetails"
+                          value={ticket.repairDetails || ''}
+                          placeholder="Details about repair"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assign technician dropdown if not assigned yet, on certain columns */}
                   {!ticket.assignedTo && column.id !== 'new' && column.id !== 'closed' && (
                     <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
                       <select
-                        onChange={(e) => assignTechnician(ticket.id, e.target.value)}
+                        onChange={(e) => handleFieldChange(ticket.id, 'assignedTo', e.target.value)}
                         value=""
                         className="w-full text-xs py-1 px-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                       >
@@ -266,7 +375,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
               ))}
             </div>
           </div>
-        ); 
+        );
       })}
     </div>
   );
