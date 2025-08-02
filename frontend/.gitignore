@@ -1,0 +1,47 @@
+# General / OS / IDE
+#---------------------------------
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDEs and Editors
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables - VERY IMPORTANT!
+#---------------------------------
+.env
+.env.*
+*.local
+!*.env.example
+
+
+# Frontend specific ignores
+#---------------------------------
+/frontend/node_modules/
+/frontend/dist/
+/frontend/dist-ssr/
+
+# Ignore VSCode settings but keep recommended extensions
+/frontend/.vscode/*
+!/frontend/.vscode/extensions.json
+
+
+# Backend specific ignores
+#---------------------------------
+/backend/node_modules/
+/backend/dist/
+/backend/.env
