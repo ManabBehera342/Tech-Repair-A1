@@ -47,7 +47,7 @@ app.use(express.json());
 const allowedOrigins = [
   'http://localhost:3000',  // or your actual local frontend port
   'http://localhost:5173',  // common Vite default
-  'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app', // your deployed frontend
+  'tech-repair-a1-l3j8z69d0-manab-beheras-projects.vercel.app', // your deployed frontend
 ];
 
 app.use(cors({
