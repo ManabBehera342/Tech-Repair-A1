@@ -11,7 +11,6 @@ const cloudinary = require('cloudinary').v2;
 const streamifier = require('streamifier');
 const { GoogleGenAI } = require('@google/genai');
 
-// --------- ENVIRONMENT VALIDATION ---------
 const requiredEnvs = [
   'PORT',
   'MONGODB_URI',
@@ -21,7 +20,7 @@ const requiredEnvs = [
   'CLOUDINARY_API_KEY',
   'CLOUDINARY_API_SECRET',
   'GEMINI_API_KEY',
-  'SERVICE_ACCOUNT_JSON', // Add this!
+  'SERVICE_ACCOUNT_JSON',
 ];
 
 const missingEnvs = requiredEnvs.filter(envVar => !process.env[envVar]);
@@ -38,53 +37,49 @@ const {
   CLOUDINARY_CLOUD_NAME,
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
-  SERVICE_ACCOUNT_JSON, // NEW - from Render env
+  SERVICE_ACCOUNT_JSON,
 } = process.env;
 
-// --------- APP & MIDDLEWARE SETUP ---------
-const app = express();
-
-
-// List all your allowed frontend origins (add any others you use)
+// Allowed frontend origins for CORS
 const allowedOrigins = [
-  'http://localhost:3000', 
-  'http://localhost:5173', // for Vite, adjust if your local frontend uses a different port
-  'https://tech-repair-a1.vercel.app', // your production Vercel site
-  'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app', // any preview URL
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'https://tech-repair-a1.vercel.app',
+  'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app',
 ];
 
-// This CORS config will allow both your local and deployed frontends
+const app = express();
+
+// JSON body parser must come before routes
+app.use(express.json());
+
+// CORS Middleware: allow only trusted origins
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like from Postman or curl)
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like Postman, curl)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
-    callback(new Error('CORS policy: Not allowed by CORS for ' + origin));
+    callback(new Error(`CORS policy: Not allowed by CORS for origin ${origin}`));
   },
   credentials: true,
 }));
 
- // Consider restricting in production
-
-// --------- MONGODB USER SCHEMA ---------
-const userSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    passwordHash: { type: String, required: true },
-    role: {
-      type: String,
-      enum: ['customer', 'service_team', 'epr_team', 'channel_partner', 'system_integrator'],
-      default: 'customer',
-    },
+// Mongoose User schema and model
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  passwordHash: { type: String, required: true },
+  role: {
+    type: String,
+    enum: ['customer', 'service_team', 'epr_team', 'channel_partner', 'system_integrator'],
+    default: 'customer',
   },
-  { timestamps: true }
-);
+}, { timestamps: true });
+
 const User = mongoose.model('User', userSchema);
 
-// --------- MONGODB CONNECTION ---------
 mongoose.connect(MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => {
@@ -92,12 +87,12 @@ mongoose.connect(MONGODB_URI)
     process.exit(1);
   });
 
-// --------- GOOGLE SHEETS SERVICE ACCOUNT (from env) ---------
+// Parse service account JSON credentials from environment
 let credentials;
 try {
   credentials = JSON.parse(SERVICE_ACCOUNT_JSON);
-} catch (error) {
-  console.error('Failed to parse service account JSON. Check SERVICE_ACCOUNT_JSON env:', error);
+} catch (err) {
+  console.error('Failed to parse SERVICE_ACCOUNT_JSON env:', err);
   process.exit(1);
 }
 
@@ -108,17 +103,15 @@ const auth = new google.auth.GoogleAuth({
 const sheets = google.sheets({ version: 'v4', auth });
 const spreadsheetId = SPREADSHEET_ID;
 
-// --------- CLOUDINARY CONFIG ---------
 cloudinary.config({
   cloud_name: CLOUDINARY_CLOUD_NAME,
   api_key: CLOUDINARY_API_KEY,
   api_secret: CLOUDINARY_API_SECRET,
 });
 
-// --------- MULTER: MEMORY STORAGE ---------
 const upload = multer({ storage: multer.memoryStorage() });
 
-// --------- JWT AUTH MIDDLEWARE ---------
+// JWT Authentication middleware
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader) return res.status(401).json({ error: 'Authorization header missing' });
@@ -131,7 +124,7 @@ function authenticateToken(req, res, next) {
   });
 }
 
-// --------- HELPERS ---------
+// Helper to append rows to a Google Sheet tab
 async function appendToSheet(tabName, values) {
   await sheets.spreadsheets.values.append({
     spreadsheetId,
@@ -141,6 +134,7 @@ async function appendToSheet(tabName, values) {
   });
 }
 
+// Helper to upload buffer to Cloudinary
 function uploadToCloudinary(buffer) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream({ folder: 'service-requests' }, (error, result) => {
@@ -151,7 +145,9 @@ function uploadToCloudinary(buffer) {
   });
 }
 
-// --------- ROUTES ---------
+// Routes
+
+// Signup
 app.post('/signup', async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
@@ -174,6 +170,7 @@ app.post('/signup', async (req, res) => {
   }
 });
 
+// Login
 app.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -197,14 +194,17 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.post('/logout', (req, res) =>
-  res.json({ message: 'Logged out successfully. Please remove token from client.' })
-);
+// Logout (stateless)
+app.post('/logout', (req, res) => {
+  res.json({ message: 'Logged out successfully. Please remove token from client.' });
+});
 
+// Profile
 app.get('/profile', authenticateToken, (req, res) => {
   res.json({ user: req.user });
 });
 
+// Create Service Request
 app.post('/service-requests', authenticateToken, async (req, res) => {
   try {
     if (req.user.role !== 'customer')
@@ -233,11 +233,12 @@ app.post('/service-requests', authenticateToken, async (req, res) => {
 
     res.status(201).json({ message: 'Request saved to Google Sheets' });
   } catch (err) {
-    console.error(err);
+    console.error('Service requests create error:', err);
     res.status(500).json({ error: 'Failed to save request' });
   }
 });
 
+// Get Service Requests
 app.get('/service-requests', authenticateToken, async (req, res) => {
   try {
     const resp = await sheets.spreadsheets.values.get({
@@ -245,6 +246,7 @@ app.get('/service-requests', authenticateToken, async (req, res) => {
       range: 'ServiceRequests!A2:L',
     });
     const rows = resp.data.values || [];
+
     const tickets = rows.map((row, idx) => ({
       id: (idx + 1).toString(),
       ticketNumber: row[1] || `TICKET-${idx + 1}`,
@@ -265,24 +267,26 @@ app.get('/service-requests', authenticateToken, async (req, res) => {
     }));
     res.json({ tickets });
   } catch (err) {
-    console.error(err);
+    console.error('Fetching service requests error:', err);
     res.status(500).json({ error: 'Failed to fetch requests' });
   }
 });
 
+// Update Service Request by ticketNumber
 app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res) => {
   try {
     const { ticketNumber } = req.params;
     const updates = req.body;
+
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: 'ServiceRequests!A2:L',
     });
     const rows = resp.data.values || [];
-    const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
+    const rowIndex = rows.findIndex(row => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
-    const row = rows[rowIndex];
 
+    const row = rows[rowIndex];
     if (updates.status !== undefined) row[6] = updates.status;
     if (updates.assignedTo !== undefined) row[7] = updates.assignedTo;
     if (updates.estimatedCost !== undefined) row[8] = updates.estimatedCost;
@@ -292,19 +296,22 @@ app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res)
     row[11] = new Date().toISOString();
 
     const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
+
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: updateRange,
       valueInputOption: 'RAW',
       requestBody: { values: [row] },
     });
+
     res.json({ message: 'Ticket updated successfully' });
   } catch (err) {
-    console.error(err);
+    console.error('Update ticket error:', err);
     res.status(500).json({ error: 'Failed to update ticket' });
   }
 });
 
+// Upload photos for a ticket
 app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos'), async (req, res) => {
   try {
     const { ticketNumber } = req.params;
@@ -313,24 +320,24 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
     if (!files || files.length === 0)
       return res.status(400).json({ error: 'No photos uploaded' });
 
-    const uploads = files.map((file) => uploadToCloudinary(file.buffer));
+    const uploads = files.map(file => uploadToCloudinary(file.buffer));
     const urls = await Promise.all(uploads);
 
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: 'ServiceRequests!A2:L',
     });
-
     const rows = resp.data.values || [];
-    const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
+    const rowIndex = rows.findIndex(row => row[1] === ticketNumber);
     if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
-    const row = rows[rowIndex];
 
+    const row = rows[rowIndex];
     const existingPhotos = row[4] ? row[4].split('; ') : [];
     const allPhotos = [...existingPhotos, ...urls];
     row[4] = allPhotos.join('; ');
 
     row[11] = new Date().toISOString();
+
     const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -338,15 +345,16 @@ app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos
       valueInputOption: 'RAW',
       requestBody: { values: [row] },
     });
+
     res.json({ message: 'Photos uploaded and attached', photoUrls: urls });
   } catch (err) {
-    console.error(err);
+    console.error('Upload photos error:', err);
     res.status(500).json({ error: 'Failed to upload photos' });
   }
 });
 
-// --------- GEMINI AI CHAT ENDPOINT ---------
-const ai = new GoogleGenAI({}); // GEMINI_API_KEY should be set in env
+// Gemini AI chat endpoint
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.post('/api/gemini-chat', async (req, res) => {
   try {
@@ -365,6 +373,12 @@ app.post('/api/gemini-chat', async (req, res) => {
   }
 });
 
+// 404 Handler for unknown routes
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Start the server
 app.listen(PORT || 3000, () => {
   console.log(`Server running on port ${PORT || 3000}`);
 });
