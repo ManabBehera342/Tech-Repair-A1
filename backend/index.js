@@ -43,27 +43,29 @@ const {
 
 // --------- APP & MIDDLEWARE SETUP ---------
 const app = express();
-app.use(express.json());
+
+
+// List all your allowed frontend origins (add any others you use)
 const allowedOrigins = [
-  'http://localhost:3000',  // or your actual local frontend port
-  'http://localhost:5173',  // common Vite default
-  'https://tech-repair-a1.vercel.app/', // your deployed frontend
+  'http://localhost:3000', 
+  'http://localhost:5173', // for Vite, adjust if your local frontend uses a different port
+  'https://tech-repair-a1.vercel.app', // your production Vercel site
+  'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app', // any preview URL
 ];
 
+// This CORS config will allow both your local and deployed frontends
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like Postman or curl)
+    // Allow requests with no origin (like from Postman or curl)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
-    } else {
-      return callback(
-        new Error('CORS policy: Origin not allowed - ' + origin)
-      );
     }
+    callback(new Error('CORS policy: Not allowed by CORS for ' + origin));
   },
   credentials: true,
 }));
+
  // Consider restricting in production
 
 // --------- MONGODB USER SCHEMA ---------
