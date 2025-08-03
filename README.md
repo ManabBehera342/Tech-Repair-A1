@@ -14,7 +14,6 @@ A comprehensive platform to streamline device repair management for customers, p
 - [Security Considerations](#security-considerations)
 - [How to Use](#how-to-use)
 - [Contributing](#contributing)
-- [License](#license)
 - [Contact](#contact)
 
 ## Project Overview
@@ -67,11 +66,11 @@ The **Electronic Repair Service Portal** is a web platform that simplifies and m
 
 | Layer         | Technology (Choose/Adapt)           |
 |---------------|-------------------------------------|
-| Frontend      | React.js / Angular / Vue.js         |
-| Backend       | Node.js (Express) / Flask / Django  |
+| Frontend      | React.js / Vite / TypeScript         |
+| Backend       | Node.js (Express)                    |
 | Database      | MongoDB Atlas (user accounts)       |
 | Third-Party   | Google Sheets API (tickets, analytics)<br>Cloudinary (media)<br>Gemini API (chatbot) |
-| Auth/Security | JWT (sessions), bcrypt (passwords)  |
+| Auth/Security | JWT (sessions)                        |
 
 ## Third-Party Integrations
 
@@ -162,17 +161,17 @@ If you prefer, you may use a version manager like **nvm**:
 - Fork the repo, create a feature branch, and open a pull request.
 - Please lint and test your code before submitting contributions.
 
-## License
-
-This project is licensed under the MIT License. See the LICENSE file for details.
 
 ## Contact
 
 For questions or support, please contact:
 
-- **Name:** Your Name
-- **Email:** your.email@example.com
-- **Project Repo:** [GitHub repository link]
-- **Website:** yourprojectwebsite.com
+- **Name:** Manab Behera
+- **Email:** manabbehera9178@gmail.com
+- **Website:** [yourprojectwebsite.com](https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app/)
+
+- **Name:** Subham Kumar Sahu
+- **Email:** saytosubhamkumar@gmail.com
+- **Website:** [yourprojectwebsite.com](https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app/)
 
 Thank you for exploring the Electronic Repair Service Portal!
