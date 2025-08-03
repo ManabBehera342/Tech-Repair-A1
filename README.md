@@ -116,6 +116,27 @@ The **Electronic Repair Service Portal** is a web platform that simplifies and m
     # or
     yarn start
     ```
+## Backend Prerequisites
+
+Before running the backend server, ensure that **Node.js** and **npm** (Node Package Manager) are installed on your system.
+
+### How to Install Node.js & npm
+
+#### Windows / macOS / Linux
+
+1. **Download Node.js:**
+   - Visit [https://nodejs.org/](https://nodejs.org/) and download the **LTS (Long Term Support)** version for your operating system.
+2. **Run the installer** and follow the setup instructions.
+3. **Verify Installation:**
+    ```
+    node -v
+    npm -v
+    ```
+   Both commands should print version numbers, confirming successful installation.
+
+#### Alternatively, for advanced users (Linux):
+
+If you prefer, you may use a version manager like **nvm**:
 
 5. **Access the Portal**
 
