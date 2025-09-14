@@ -57,7 +57,7 @@ const corsOptions = {
     const allowedOrigins = [
       'http://localhost:3000', // Frontend dev server
       'http://localhost:5173', // Vite dev server
-      'https://your-app.vercel.app', // Replace with your Vercel domain
+      'https://tech-repair-a1-git-main-manab-beheras-projects.vercel.app/', // Replace with your Vercel domain
     ];
 
     // Allow any origin in development
