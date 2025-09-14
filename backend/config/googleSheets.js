@@ -11,8 +11,32 @@ let spreadsheetId = null;
 
 const configureGoogleSheets = () => {
   try {
-    // Read service account credentials
-    const credentials = JSON.parse(fs.readFileSync('./service-account.json', 'utf8'));
+    // Read service account credentials - check multiple locations
+    let credentials;
+    const possiblePaths = [
+      '/etc/secrets/service-account.json', // Render deployment path
+      './service-account.json', // Local development path
+      process.env.GOOGLE_SERVICE_ACCOUNT_JSON // Environment variable as fallback
+    ];
+
+    // Try to read from file paths first
+    for (const path of possiblePaths.slice(0, 2)) {
+      if (fs.existsSync(path)) {
+        credentials = JSON.parse(fs.readFileSync(path, 'utf8'));
+        console.log(`✅ Loaded service account from: ${path}`);
+        break;
+      }
+    }
+
+    // If no file found, try environment variable
+    if (!credentials && process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      console.log('✅ Loaded service account from environment variable');
+    }
+
+    if (!credentials) {
+      throw new Error('Service account credentials not found in any expected location');
+    }
 
     // Create auth instance
     auth = new google.auth.GoogleAuth({
