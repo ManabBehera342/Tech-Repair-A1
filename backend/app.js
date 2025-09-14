@@ -86,6 +86,29 @@ app.use('/api/partner', partnerRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api/gemini', geminiRoutes);
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Tech Repair API',
+    version: '1.0.0',
+    status: 'running',
+    endpoints: {
+      auth: {
+        signup: 'POST /signup',
+        login: 'POST /login',
+        logout: 'POST /logout',
+        profile: 'GET /profile'
+      },
+      serviceRequests: 'POST /service-requests',
+      integrator: '/api/integrator/*',
+      partner: '/api/partner/*',
+      notifications: '/api/notifications',
+      gemini: '/api/gemini/*',
+      health: 'GET /health'
+    }
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
