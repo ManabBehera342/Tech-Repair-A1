@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { API_ENDPOINTS } from '../config/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -46,7 +47,7 @@ interface NewRequestFormData {
 const fetchPartnerRequests = async (partnerId: string, statusFilter?: string): Promise<ServiceRequest[]> => {
   const token = localStorage.getItem('token');
 
-  let url = `http://localhost:3000/api/partner/${partnerId}/requests`;
+  let url = `${API_ENDPOINTS.PARTNER}/${partnerId}/requests`;
   if (statusFilter && statusFilter !== 'All') {
     url += `?status=${statusFilter}`;
   }
@@ -76,7 +77,7 @@ const createPartnerRequest = async (partnerId: string, requestData: {
 }): Promise<ServiceRequest> => {
   const token = localStorage.getItem('token');
 
-  const response = await fetch(`http://localhost:3000/api/partner/${partnerId}/requests`, {
+  const response = await fetch(`${API_ENDPOINTS.PARTNER}/${partnerId}/requests`, {
     method: 'POST',
     headers: {
       'Authorization': token ? `Bearer ${token}` : '',

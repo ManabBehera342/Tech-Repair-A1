@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Clock, User, AlertCircle, Camera, MessageSquare } from 'lucide-react';
 import { useNotification } from '../contexts/NotificationContext';
+import { API_ENDPOINTS } from '../config/api';
 
 interface ServiceTicket {
   id: string;
@@ -74,7 +75,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
     async function fetchTickets() {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch('http://localhost:3000/service-requests', {
+        const res = await fetch(API_ENDPOINTS.SERVICE_REQUESTS, {
           headers: {
             Authorization: token ? `Bearer ${token}` : '',
           }
@@ -113,7 +114,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
         )
       );
 
-      const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
+      const res = await fetch(`${API_ENDPOINTS.SERVICE_REQUESTS}/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -157,7 +158,7 @@ const KanbanBoard: React.FC<KanbanBoardProps> = ({ tickets, setTickets }) => {
       const patchBody: Partial<Record<string, string>> = {};
       patchBody[field] = value;
 
-      const res = await fetch(`http://localhost:3000/service-requests/${ticketToUpdate.ticketNumber}`, {
+      const res = await fetch(`${API_ENDPOINTS.SERVICE_REQUESTS}/${ticketToUpdate.ticketNumber}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { API_ENDPOINTS } from '../config/api';
 
 export type UserRole =
   | 'customer'
@@ -37,7 +38,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
    * Login function - calls backend API and stores user/token on success
    */
   const login = async (email: string, password: string, role: UserRole) => {
-    const response = await fetch('http://localhost:3000/login', {
+    const response = await fetch(API_ENDPOINTS.LOGIN, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -67,7 +68,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
    * Signup function - call backend signup API
    */
   const signup = async (name: string, email: string, password: string, role: UserRole) => {
-    const response = await fetch('http://localhost:3000/signup', {
+    const response = await fetch(API_ENDPOINTS.SIGNUP, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

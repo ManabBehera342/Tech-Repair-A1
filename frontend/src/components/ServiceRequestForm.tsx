@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { API_ENDPOINTS, API_BASE_URL } from '../config/api';
 import { 
   User, Mail, Phone, MapPin, Calendar, Upload, CheckCircle,
   ArrowLeft, ArrowRight, Camera, X, AlertCircle, FileText
@@ -167,7 +168,7 @@ const ServiceRequestForm: React.FC = () => {
     const token = localStorage.getItem('token');
     const form = new FormData();
     photos.forEach(photo => form.append('photos', photo));
-    await fetch(`http://localhost:3000/upload-photos/${serialNumber}`, {
+    await fetch(`${API_ENDPOINTS.UPLOAD_PHOTOS}/${serialNumber}`, {
       method: 'POST',
       headers: { Authorization: token ? `Bearer ${token}` : '' },
       body: form,
@@ -187,7 +188,7 @@ const ServiceRequestForm: React.FC = () => {
         faultDescription: `[${formData.problemDetails.issues.join(', ')}] ${formData.problemDetails.description}`,
         estimatedCost: estimatedCost.toString(),
       };
-      const response = await fetch('http://localhost:3000/service-requests', {
+      const response = await fetch(API_ENDPOINTS.SERVICE_REQUESTS, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

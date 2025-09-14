@@ -46,7 +46,35 @@ requiredEnvs.forEach((envVar) => {
 
 // Middleware
 app.use(express.json());
-app.use(cors());
+
+// CORS configuration for production and development
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, server-to-server requests)
+    if (!origin) return callback(null, true);
+
+    // Development and production allowed origins
+    const allowedOrigins = [
+      'http://localhost:3000', // Frontend dev server
+      'http://localhost:5173', // Vite dev server
+      'https://your-app.vercel.app', // Replace with your Vercel domain
+    ];
+
+    // Allow any origin in development
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
 
 // Routes
 app.use('/', authRoutes); // Mount auth routes at root level for backward compatibility

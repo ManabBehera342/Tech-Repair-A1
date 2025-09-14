@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageCircle, X, Send, Bot, User } from 'lucide-react';
+import { API_ENDPOINTS } from '../config/api';
 
 interface Message {
   id: string;
@@ -51,7 +52,7 @@ const ChatBot: React.FC = () => {
     setInputText('');
 
     try {
-      const response = await fetch('http://localhost:3000/api/gemini-chat', {
+      const response = await fetch(API_ENDPOINTS.GEMINI_CHAT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),

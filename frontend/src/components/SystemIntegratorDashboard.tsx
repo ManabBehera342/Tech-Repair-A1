@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { API_ENDPOINTS } from '../config/api';
 import { useNotification } from '../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -87,7 +88,7 @@ interface FaultStats {
 const fetchIntegratorProjects = async (integratorId: string): Promise<Project[]> => {
   const token = localStorage.getItem('token');
 
-  const response = await fetch(`http://localhost:3000/api/integrator/${integratorId}/projects`, {
+  const response = await fetch(`${API_ENDPOINTS.INTEGRATOR}/${integratorId}/projects`, {
     method: 'GET',
     headers: {
       'Authorization': token ? `Bearer ${token}` : '',
@@ -106,7 +107,7 @@ const fetchIntegratorProjects = async (integratorId: string): Promise<Project[]>
 const fetchFaultStats = async (integratorId: string): Promise<FaultStats> => {
   const token = localStorage.getItem('token');
 
-  const response = await fetch(`http://localhost:3000/api/integrator/${integratorId}/fault-stats`, {
+  const response = await fetch(`${API_ENDPOINTS.INTEGRATOR}/${integratorId}/fault-stats`, {
     method: 'GET',
     headers: {
       'Authorization': token ? `Bearer ${token}` : '',
