@@ -1,0 +1,1227 @@
+require('dotenv').config();
+
+const express = require('express');
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const fs = require('fs');
+const { google } = require('googleapis');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
+const { GoogleGenAI } = require('@google/genai'); // Use official SDK
+const { sendNotification, testEmailConfiguration } = require('./services/notificationService');
+
+const app = express();
+app.use(express.json());
+app.use(cors());
+
+// Warn if required env variables are missing
+const requiredEnvs = [
+  'PORT',
+  'MONGODB_URI',
+  'JWT_SECRET',
+  'SPREADSHEET_ID',
+  'CLOUDINARY_CLOUD_NAME',
+  'CLOUDINARY_API_KEY',
+  'CLOUDINARY_API_SECRET',
+  'GEMINI_API_KEY',
+  'EMAIL_USER',
+  'EMAIL_PASS',
+];
+requiredEnvs.forEach((envVar) => {
+  if (!process.env[envVar]) {
+    console.warn(`Warning: Environment variable ${envVar} is not set.`);
+  }
+});
+
+const {
+  PORT,
+  MONGODB_URI,
+  JWT_SECRET,
+  SPREADSHEET_ID,
+  CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET,
+} = process.env;
+
+// MongoDB User Schema and Model
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    passwordHash: { type: String, required: true },
+    role: {
+      type: String,
+      enum: ['customer', 'service_team', 'epr_team', 'channel_partner', 'system_integrator'],
+      default: 'customer',
+    },
+  },
+  { timestamps: true }
+);
+
+const User = mongoose.model('User', userSchema);
+
+// Request Schema for Channel Partners
+const requestSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    partnerId: { type: String, required: true, index: true },
+    customerName: { type: String, required: true },
+    product: { type: String, required: true },
+    serialNumber: { type: String, required: true },
+    fault: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ['Pending', 'Approved', 'Repaired', 'Dispatched'],
+      default: 'Pending',
+      index: true
+    },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+  },
+  { timestamps: true }
+);
+
+const Request = mongoose.model('Request', requestSchema);
+
+// Project Schema for System Integrators
+const projectSchema = new mongoose.Schema(
+  {
+    projectId: { type: String, required: true, unique: true },
+    integratorId: { type: String, required: true, index: true },
+    name: { type: String, required: true },
+    location: { type: String, required: true },
+    numberOfDevices: { type: Number, default: 0 },
+    openRequests: { type: Number, default: 0 },
+    status: {
+      type: String,
+      enum: ['Active', 'Completed', 'On Hold', 'Cancelled'],
+      default: 'Active'
+    },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+  },
+  { timestamps: true }
+);
+
+const Project = mongoose.model('Project', projectSchema);
+
+// Device Schema for tracking individual devices in projects
+const deviceSchema = new mongoose.Schema(
+  {
+    serialNumber: { type: String, required: true, unique: true },
+    projectId: { type: String, required: true, index: true },
+    integratorId: { type: String, required: true, index: true },
+    productType: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ['Operational', 'Faulty', 'Under Repair', 'Replaced', 'Decommissioned'],
+      default: 'Operational'
+    },
+    faultHistory: [{
+      faultType: String,
+      description: String,
+      reportedDate: { type: Date, default: Date.now },
+      resolvedDate: Date,
+      status: {
+        type: String,
+        enum: ['Open', 'In Progress', 'Resolved'],
+        default: 'Open'
+      }
+    }],
+    installationDate: { type: Date, default: Date.now },
+    lastMaintenanceDate: Date,
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+  },
+  { timestamps: true }
+);
+
+const Device = mongoose.model('Device', deviceSchema);
+
+// Connect MongoDB
+mongoose
+  .connect(MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB'))
+  .catch((err) => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1);
+  });
+
+// Google Sheets API Client Setup with error handling
+let credentials;
+try {
+  credentials = JSON.parse(fs.readFileSync('./service-account.json', 'utf8'));
+} catch (error) {
+  console.error('Failed to read service-account.json:', error);
+  process.exit(1);
+}
+
+const auth = new google.auth.GoogleAuth({
+  credentials,
+  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
+
+const sheets = google.sheets({ version: 'v4', auth });
+const spreadsheetId = SPREADSHEET_ID;
+
+// Cloudinary Config
+cloudinary.config({
+  cloud_name: CLOUDINARY_CLOUD_NAME,
+  api_key: CLOUDINARY_API_KEY,
+  api_secret: CLOUDINARY_API_SECRET,
+});
+
+// Multer setup for in-memory upload
+const upload = multer({ storage: multer.memoryStorage() });
+
+// JWT Authentication Middleware
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return res.status(401).json({ error: 'Authorization header missing' });
+  const token = authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token missing' });
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: 'Invalid or expired token' });
+    req.user = user;
+    next();
+  });
+}
+
+// Utility: Append rows to Google Sheets
+async function appendToSheet(tabName, values) {
+  const client = await auth.getClient();
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: tabName,
+    valueInputOption: 'RAW',
+    requestBody: { values },
+  });
+}
+
+// Upload buffer to Cloudinary helper
+function uploadToCloudinary(buffer) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({ folder: 'service-requests' }, (error, result) => {
+      if (error) return reject(error);
+      resolve(result.secure_url);
+    });
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
+}
+
+// Signup Route
+app.post('/signup', async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password || !role)
+      return res.status(400).json({ error: 'Name, email, password and role required' });
+
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) return res.status(409).json({ error: 'Email already registered' });
+
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash(password, salt);
+
+    const user = new User({ name, email: email.toLowerCase(), passwordHash, role });
+    await user.save();
+
+    res.status(201).json({ message: 'User created successfully' });
+  } catch (err) {
+    console.error('Signup error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Login Route
+app.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!isMatch) return res.status(401).json({ error: 'Invalid email or password' });
+
+    const token = jwt.sign(
+      { userId: user._id, name: user.name, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '8h' }
+    );
+
+    res.json({ token, user: { name: user.name, email: user.email, role: user.role } });
+  } catch (err) {
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Logout Route (stateless)
+app.post('/logout', (req, res) =>
+  res.json({ message: 'Logged out successfully. Please remove token from client.' })
+);
+
+// Profile Route
+app.get('/profile', authenticateToken, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// Add Service Request
+app.post('/service-requests', authenticateToken, async (req, res) => {
+  try {
+    if (!['customer', 'channel_partner', 'system_integrator'].includes(req.user.role))
+      return res.status(403).json({ error: 'Only customers, channel partners, and system integrators can create service requests' });
+
+    const { customerName, customerEmail, serialNumber, productDetails, purchaseDate, photos, faultDescription } = req.body;
+
+    if (!customerName || !serialNumber || !productDetails || !purchaseDate || !faultDescription)
+      return res.status(400).json({ error: 'Missing required fields' });
+
+    const photoString = Array.isArray(photos) ? photos.join('; ') : '';
+
+    const row = [
+      customerName,
+      serialNumber,
+      productDetails,
+      purchaseDate,
+      photoString,
+      faultDescription,
+      'new', // status
+      '', // assignedTo
+      '', // estimatedCost
+      '', // dispatchDetails
+      '', // repairDetails
+      new Date().toISOString(),
+    ];
+
+    await appendToSheet('ServiceRequests', [row]);
+
+    // Send "Created" notification to customer
+    try {
+      const customer = {
+        name: customerName,
+        email: customerEmail || 'customer@example.com', // Use actual customer email from form
+        phone: '+91-0000000000' // In production, get phone from request
+      };
+
+      await sendNotification(customer, 'Created', {
+        id: serialNumber // Using serial number as request ID
+      });
+    } catch (notificationError) {
+      console.error('Failed to send creation notification:', notificationError.message);
+      // Don't fail the request creation if notification fails
+    }
+
+    res.status(201).json({ message: 'Request saved to Google Sheets and notification sent' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save request' });
+  }
+});
+
+// Fetch Service Requests
+app.get('/service-requests', authenticateToken, async (req, res) => {
+  try {
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'ServiceRequests!A2:L',
+    });
+
+    const rows = resp.data.values || [];
+
+    const tickets = rows.map((row, idx) => ({
+      id: (idx + 1).toString(),
+      ticketNumber: row[1] || `TICKET-${idx + 1}`, // SERIAL NUMBER as ID!
+      customerName: row[0] || '',
+      serialNumber: row[1] || '',
+      productType: row[2] || '',
+      issue: row[5] || '',
+      status: row[6] || 'new',
+      priority: 'medium',
+      assignedTo: row[7] || '',
+      estimatedCost: row[8] || '',
+      dispatchDetails: row[9] || '',
+      repairDetails: row[10] || '',
+      createdAt: row[11] || '',
+      updatedAt: row[11] || '',
+      photos: row[4] ? row[4].split('; ') : [],
+      description: row[5] || '',
+    }));
+
+    res.json({ tickets });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch requests' });
+  }
+});
+
+// Update Service Request - match on serial number (column B)
+app.patch('/service-requests/:ticketNumber', authenticateToken, async (req, res) => {
+  try {
+    const { ticketNumber } = req.params;
+    const updates = req.body;
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'ServiceRequests!A2:L',
+    });
+
+    const rows = resp.data.values || [];
+
+    const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
+    if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
+
+    const row = rows[rowIndex];
+
+    if (updates.status !== undefined) row[6] = updates.status;
+    if (updates.assignedTo !== undefined) row[7] = updates.assignedTo;
+    if (updates.estimatedCost !== undefined) row[8] = updates.estimatedCost;
+    if (updates.dispatchDetails !== undefined) row[9] = updates.dispatchDetails;
+    if (updates.repairDetails !== undefined) row[10] = updates.repairDetails;
+
+    row[11] = new Date().toISOString();
+
+    const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: updateRange,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] },
+    });
+
+    res.json({ message: 'Ticket updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update ticket' });
+  }
+});
+
+// Upload Photos Endpoint - match on serial number (column B)
+app.post('/upload-photos/:ticketNumber', authenticateToken, upload.array('photos'), async (req, res) => {
+  try {
+    const { ticketNumber } = req.params;
+    const files = req.files;
+
+    if (!files || files.length === 0)
+      return res.status(400).json({ error: 'No photos uploaded' });
+
+    const uploads = files.map((file) => uploadToCloudinary(file.buffer));
+    const urls = await Promise.all(uploads);
+
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'ServiceRequests!A2:L',
+    });
+
+    const rows = resp.data.values || [];
+    const rowIndex = rows.findIndex((row) => row[1] === ticketNumber);
+    if (rowIndex === -1) return res.status(404).json({ error: 'Ticket not found' });
+
+    const row = rows[rowIndex];
+
+    const existingPhotos = row[4] ? row[4].split('; ') : [];
+    const allPhotos = [...existingPhotos, ...urls];
+    row[4] = allPhotos.join('; ');
+
+    row[11] = new Date().toISOString();
+
+    const updateRange = `ServiceRequests!A${rowIndex + 2}:L${rowIndex + 2}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: updateRange,
+      valueInputOption: 'RAW',
+      requestBody: { values: [row] },
+    });
+
+    res.json({ message: 'Photos uploaded and attached', photoUrls: urls });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload photos' });
+  }
+});
+
+// System Integrator Routes
+// Get all projects for a specific integrator with nested device info
+app.get('/api/integrator/:integratorId/projects', authenticateToken, async (req, res) => {
+  try {
+    const { integratorId } = req.params;
+
+    // Fetch all projects for the integrator
+    const projects = await Project.find({ integratorId })
+      .sort({ updatedAt: -1 })
+      .lean();
+
+    // For each project, fetch associated devices
+    const projectsWithDevices = await Promise.all(
+      projects.map(async (project) => {
+        const devices = await Device.find({ projectId: project.projectId })
+          .select('serialNumber productType status faultHistory')
+          .lean();
+
+        // Update project counts
+        const openRequests = devices.reduce((count, device) => {
+          const openFaults = device.faultHistory?.filter(fault => fault.status !== 'Resolved').length || 0;
+          return count + openFaults;
+        }, 0);
+
+        return {
+          ...project,
+          numberOfDevices: devices.length,
+          openRequests,
+          devices: devices.map(device => ({
+            serialNumber: device.serialNumber,
+            productType: device.productType,
+            status: device.status,
+            faultHistory: device.faultHistory || []
+          }))
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      projects: projectsWithDevices,
+      total: projectsWithDevices.length
+    });
+
+  } catch (error) {
+    console.error('Error fetching integrator projects:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch projects'
+    });
+  }
+});
+
+// Get fault statistics for a specific integrator
+app.get('/api/integrator/:integratorId/fault-stats', authenticateToken, async (req, res) => {
+  try {
+    const { integratorId } = req.params;
+
+    // Get all devices for this integrator
+    const devices = await Device.find({ integratorId }).lean();
+
+    // Aggregate fault statistics
+    const faultStats = {
+      totalDevices: devices.length,
+      totalFaults: 0,
+      openFaults: 0,
+      resolvedFaults: 0,
+      commonFaults: {},
+      faultTrends: [],
+      deviceStatusBreakdown: {
+        Operational: 0,
+        Faulty: 0,
+        'Under Repair': 0,
+        Replaced: 0,
+        Decommissioned: 0
+      }
+    };
+
+    // Process each device
+    devices.forEach(device => {
+      // Count device statuses
+      faultStats.deviceStatusBreakdown[device.status] =
+        (faultStats.deviceStatusBreakdown[device.status] || 0) + 1;
+
+      // Process fault history
+      if (device.faultHistory && device.faultHistory.length > 0) {
+        device.faultHistory.forEach(fault => {
+          faultStats.totalFaults++;
+
+          if (fault.status === 'Resolved') {
+            faultStats.resolvedFaults++;
+          } else {
+            faultStats.openFaults++;
+          }
+
+          // Count common fault types
+          const faultType = fault.faultType || 'Unknown';
+          faultStats.commonFaults[faultType] =
+            (faultStats.commonFaults[faultType] || 0) + 1;
+        });
+      }
+    });
+
+    // Generate fault trends (last 6 months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const monthName = date.toLocaleString('default', { month: 'short' });
+
+      // Count faults for this month
+      const faultsThisMonth = devices.reduce((count, device) => {
+        if (device.faultHistory) {
+          return count + device.faultHistory.filter(fault => {
+            const faultDate = new Date(fault.reportedDate);
+            return faultDate.getMonth() === date.getMonth() &&
+                   faultDate.getFullYear() === date.getFullYear();
+          }).length;
+        }
+        return count;
+      }, 0);
+
+      faultStats.faultTrends.push({
+        month: monthName,
+        faults: faultsThisMonth
+      });
+    }
+
+    // Convert commonFaults object to array for easier frontend consumption
+    faultStats.commonFaultsArray = Object.entries(faultStats.commonFaults)
+      .map(([faultType, count]) => ({ faultType, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10); // Top 10 most common faults
+
+    res.json({
+      success: true,
+      stats: faultStats
+    });
+
+  } catch (error) {
+    console.error('Error fetching fault stats:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch fault statistics'
+    });
+  }
+});
+
+// Create a new project for a system integrator
+app.post('/api/integrator/:integratorId/projects', authenticateToken, async (req, res) => {
+  try {
+    const { integratorId } = req.params;
+    const { name, location } = req.body;
+
+    if (!name || !location) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: name, location'
+      });
+    }
+
+    // Generate unique project ID
+    const existingCount = await Project.countDocuments({ integratorId });
+    const projectId = `PROJ-${integratorId.slice(0, 4).toUpperCase()}-${String(existingCount + 1).padStart(3, '0')}`;
+
+    const newProject = new Project({
+      projectId,
+      integratorId,
+      name,
+      location,
+      numberOfDevices: 0,
+      openRequests: 0
+    });
+
+    await newProject.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Project created successfully',
+      project: newProject
+    });
+
+  } catch (error) {
+    console.error('Error creating project:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create project'
+    });
+  }
+});
+
+// Add devices to a project (for CSV upload functionality)
+app.post('/api/integrator/:integratorId/projects/:projectId/devices', authenticateToken, async (req, res) => {
+  try {
+    const { integratorId, projectId } = req.params;
+    const { devices } = req.body;
+
+    if (!devices || !Array.isArray(devices)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid devices data. Expected array of devices.'
+      });
+    }
+
+    // Verify project exists and belongs to this integrator
+    const project = await Project.findOne({ projectId, integratorId });
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: 'Project not found'
+      });
+    }
+
+    // Create devices
+    const deviceDocs = devices.map(device => ({
+      ...device,
+      projectId,
+      integratorId,
+      faultHistory: device.faultHistory || []
+    }));
+
+    await Device.insertMany(deviceDocs, { ordered: false }); // ordered: false to continue on duplicate errors
+
+    // Update project device count
+    const deviceCount = await Device.countDocuments({ projectId });
+    await Project.findOneAndUpdate(
+      { projectId },
+      { numberOfDevices: deviceCount }
+    );
+
+    res.status(201).json({
+      success: true,
+      message: `Successfully added ${deviceDocs.length} devices to project`,
+      devicesAdded: deviceDocs.length
+    });
+
+  } catch (error) {
+    console.error('Error adding devices:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to add devices'
+    });
+  }
+});
+
+// Channel Partner Routes
+// Get all requests for a specific partner with optional filtering
+app.get('/api/partner/:partnerId/requests', authenticateToken, async (req, res) => {
+  try {
+    const { partnerId } = req.params;
+    const { status } = req.query;
+
+    // Build query object
+    let query = { partnerId };
+
+    // Add status filter if provided
+    if (status && status !== 'All') {
+      query.status = status;
+    }
+
+    // Fetch requests from MongoDB
+    const requests = await Request.find(query)
+      .sort({ updatedAt: -1 }) // Sort by most recently updated first
+      .lean(); // Return plain JavaScript objects for better performance
+
+    // Transform to match frontend expectations
+    const transformedRequests = requests.map(request => ({
+      id: request.id,
+      customerName: request.customerName,
+      product: request.product,
+      serialNumber: request.serialNumber,
+      fault: request.fault,
+      status: request.status,
+      lastUpdate: request.updatedAt.toISOString(),
+      createdAt: request.createdAt.toISOString(),
+      partnerId: request.partnerId
+    }));
+
+    res.json({
+      success: true,
+      requests: transformedRequests,
+      total: transformedRequests.length
+    });
+
+  } catch (error) {
+    console.error('Error fetching partner requests:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch requests'
+    });
+  }
+});
+
+// Create a new request for a channel partner
+app.post('/api/partner/:partnerId/requests', authenticateToken, async (req, res) => {
+  try {
+    const { partnerId } = req.params;
+    const { customerName, serialNumber, product, fault } = req.body;
+
+    // Validate required fields
+    if (!customerName || !serialNumber || !product || !fault) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: customerName, serialNumber, product, fault'
+      });
+    }
+
+    // Generate unique request ID
+    const existingCount = await Request.countDocuments({ partnerId });
+    const requestId = `REQ-${partnerId}-${String(existingCount + 1).padStart(3, '0')}`;
+
+    // Create new request
+    const newRequest = new Request({
+      id: requestId,
+      partnerId,
+      customerName,
+      product,
+      serialNumber,
+      fault,
+      status: 'Pending'
+    });
+
+    await newRequest.save();
+
+    // Return the created request
+    const response = {
+      id: newRequest.id,
+      customerName: newRequest.customerName,
+      product: newRequest.product,
+      serialNumber: newRequest.serialNumber,
+      fault: newRequest.fault,
+      status: newRequest.status,
+      lastUpdate: newRequest.updatedAt.toISOString(),
+      createdAt: newRequest.createdAt.toISOString(),
+      partnerId: newRequest.partnerId
+    };
+
+    res.status(201).json({
+      success: true,
+      message: 'Request created successfully',
+      request: response
+    });
+
+  } catch (error) {
+    console.error('Error creating partner request:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to create request'
+    });
+  }
+});
+
+// Update request status
+app.patch('/api/partner/:partnerId/requests/:requestId', authenticateToken, async (req, res) => {
+  try {
+    const { partnerId, requestId } = req.params;
+    const { status } = req.body;
+
+    // Validate status
+    const validStatuses = ['Pending', 'Approved', 'Repaired', 'Dispatched'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid status. Must be one of: ' + validStatuses.join(', ')
+      });
+    }
+
+    // Find and update the request
+    const request = await Request.findOneAndUpdate(
+      { id: requestId, partnerId },
+      {
+        ...(status && { status }),
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        error: 'Request not found'
+      });
+    }
+
+    // Return updated request
+    const response = {
+      id: request.id,
+      customerName: request.customerName,
+      product: request.product,
+      serialNumber: request.serialNumber,
+      fault: request.fault,
+      status: request.status,
+      lastUpdate: request.updatedAt.toISOString(),
+      createdAt: request.createdAt.toISOString(),
+      partnerId: request.partnerId
+    };
+
+    res.json({
+      success: true,
+      message: 'Request updated successfully',
+      request: response
+    });
+
+  } catch (error) {
+    console.error('Error updating partner request:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update request'
+    });
+  }
+});
+
+// Notification Routes
+// Update status and send notifications
+app.post('/api/update-status', authenticateToken, async (req, res) => {
+  try {
+    const { requestId, newStatus, extraData = {} } = req.body;
+
+    if (!requestId || !newStatus) {
+      return res.status(400).json({
+        success: false,
+        error: 'requestId and newStatus are required'
+      });
+    }
+
+    // Validate status
+    const validStatuses = ['Created', 'CostEstimate', 'Repaired', 'Dispatched'];
+    if (!validStatuses.includes(newStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Valid statuses: ${validStatuses.join(', ')}`
+      });
+    }
+
+    // Mock customer data (in production, fetch from database by requestId)
+    const mockCustomers = {
+      'REQ-001': {
+        name: 'John Smith',
+        email: 'john.smith@example.com',
+        phone: '+91-9876543210'
+      },
+      'REQ-002': {
+        name: 'Sarah Johnson',
+        email: 'sarah.johnson@example.com',
+        phone: '+91-9876543211'
+      },
+      'TEST-001': {
+        name: 'Test Customer',
+        email: 'test@example.com',
+        phone: '+91-9999999999'
+      }
+    };
+
+    // Find customer (in production, query your database)
+    let customer = mockCustomers[requestId];
+
+    // If not found in mock data, try to fetch from Google Sheets or MongoDB
+    if (!customer) {
+      try {
+        // Try to fetch from Google Sheets service requests
+        const resp = await sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: 'ServiceRequests!A2:L',
+        });
+
+        const rows = resp.data.values || [];
+        const requestRow = rows.find(row => row[1] === requestId); // serial number as ID
+
+        if (requestRow) {
+          customer = {
+            name: requestRow[0], // customerName
+            email: 'customer@example.com', // Default email (sheets don't store email)
+            phone: '+91-0000000000' // Default phone
+          };
+        }
+      } catch (error) {
+        console.warn('Could not fetch from sheets:', error.message);
+      }
+    }
+
+    if (!customer) {
+      return res.status(404).json({
+        success: false,
+        error: 'Customer not found for the given requestId'
+      });
+    }
+
+    // Prepare notification data based on status
+    let notificationData = {
+      id: requestId,
+      ...extraData
+    };
+
+    // Add status-specific data
+    switch (newStatus) {
+      case 'Created':
+        // No additional data needed
+        break;
+      case 'CostEstimate':
+        notificationData.amount = extraData.amount || '2,500';
+        notificationData.description = extraData.description || 'Parts replacement and labor charges';
+        break;
+      case 'Repaired':
+        notificationData.workDone = extraData.workDone || 'Component replacement and testing completed';
+        break;
+      case 'Dispatched':
+        notificationData.trackingNo = extraData.trackingNo || 'TRP' + Date.now();
+        notificationData.courier = extraData.courier || 'BlueDart';
+        notificationData.expectedDelivery = extraData.expectedDelivery || new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toLocaleDateString();
+        notificationData.trackingUrl = extraData.trackingUrl || `https://www.bluedart.com/tracking/${notificationData.trackingNo}`;
+        break;
+    }
+
+    // Send notification
+    await sendNotification(customer, newStatus, notificationData);
+
+    // Update status in your database/sheets here
+    // For demo purposes, we'll just log it
+    console.log(`📋 Status updated: ${requestId} -> ${newStatus}`);
+
+    res.json({
+      success: true,
+      message: `Status updated to ${newStatus} and notifications sent`,
+      requestId,
+      newStatus,
+      customer: {
+        name: customer.name,
+        email: customer.email
+      },
+      notificationData
+    });
+
+  } catch (error) {
+    console.error('Error updating status:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update status and send notifications',
+      details: error.message
+    });
+  }
+});
+
+// Test notification endpoint (for development/demo purposes)
+app.post('/api/test-notification', authenticateToken, async (req, res) => {
+  try {
+    const { customerName, customerEmail, customerPhone, stage, extraData } = req.body;
+
+    const testCustomer = {
+      name: customerName || 'Test Customer',
+      email: customerEmail || 'test@example.com',
+      phone: customerPhone || '+91-9999999999'
+    };
+
+    const testData = {
+      id: 'TEST-' + Date.now(),
+      amount: '1,500',
+      description: 'Screen replacement',
+      workDone: 'LCD display replaced and tested',
+      trackingNo: 'TEST123456',
+      courier: 'BlueDart',
+      expectedDelivery: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toLocaleDateString(),
+      trackingUrl: 'https://www.bluedart.com/tracking/TEST123456',
+      ...extraData
+    };
+
+    await sendNotification(testCustomer, stage || 'Created', testData);
+
+    res.json({
+      success: true,
+      message: 'Test notification sent successfully',
+      testCustomer,
+      stage: stage || 'Created'
+    });
+
+  } catch (error) {
+    console.error('Error sending test notification:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send test notification',
+      details: error.message
+    });
+  }
+});
+
+// Test email configuration endpoint
+app.get('/api/test-email-config', authenticateToken, async (req, res) => {
+  try {
+    const isValid = await testEmailConfiguration();
+    res.json({
+      success: isValid,
+      message: isValid ? 'Email configuration is valid' : 'Email configuration has issues',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to test email configuration',
+      details: error.message
+    });
+  }
+});
+
+// Gemini Chat endpoint using official @google/genai SDK
+const ai = new GoogleGenAI({}); // picks API key from GEMINI_API_KEY env var
+
+app.post('/api/gemini-chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ reply: 'Message required' });
+
+    // Use Gemini 2.5 Flash model for fastest responses
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: message,
+      // Optionally, for speed/cost, you could disable "thinking" here
+      // config: { thinkingConfig: { thinkingBudget: 0 } }
+    });
+
+    res.json({ reply: response.text });
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    res.status(500).json({ reply: 'Error communicating with Gemini API' });
+  }
+});
+
+// Sample data seeding function for development/testing
+async function seedSampleData() {
+  try {
+    // Check if sample data already exists
+    const existingProject = await Project.findOne({ integratorId: 'test@integrator.com' });
+    if (existingProject) {
+      console.log('Sample data already exists, skipping seed.');
+      return;
+    }
+
+    console.log('Seeding sample data for system integrator...');
+
+    // Create sample projects
+    const sampleProjects = [
+      {
+        projectId: 'PROJ-TEST-001',
+        integratorId: 'test@integrator.com',
+        name: 'Smart City Infrastructure',
+        location: 'Downtown Metro Area',
+        numberOfDevices: 0,
+        openRequests: 0,
+        status: 'Active'
+      },
+      {
+        projectId: 'PROJ-TEST-002',
+        integratorId: 'test@integrator.com',
+        name: 'Industrial Complex Security',
+        location: 'North Industrial Zone',
+        numberOfDevices: 0,
+        openRequests: 0,
+        status: 'Active'
+      }
+    ];
+
+    await Project.insertMany(sampleProjects);
+
+    // Create sample devices with fault history
+    const sampleDevices = [
+      {
+        serialNumber: 'EPB-001-2024',
+        projectId: 'PROJ-TEST-001',
+        integratorId: 'test@integrator.com',
+        productType: 'Energizer Power Bank',
+        status: 'Operational',
+        faultHistory: []
+      },
+      {
+        serialNumber: 'GMC-002-2024',
+        projectId: 'PROJ-TEST-001',
+        integratorId: 'test@integrator.com',
+        productType: 'Gate Motor Controller',
+        status: 'Faulty',
+        faultHistory: [
+          {
+            faultType: 'Communication Error',
+            description: 'Device not responding to network commands',
+            reportedDate: new Date('2024-01-10'),
+            status: 'Open'
+          }
+        ]
+      },
+      {
+        serialNumber: 'PA-003-2024',
+        projectId: 'PROJ-TEST-001',
+        integratorId: 'test@integrator.com',
+        productType: 'Power Adapter',
+        status: 'Under Repair',
+        faultHistory: [
+          {
+            faultType: 'Overheating',
+            description: 'Device temperature exceeding safe limits',
+            reportedDate: new Date('2024-01-08'),
+            resolvedDate: new Date('2024-01-12'),
+            status: 'Resolved'
+          },
+          {
+            faultType: 'Output Voltage Low',
+            description: 'Output voltage below specification',
+            reportedDate: new Date('2024-01-15'),
+            status: 'In Progress'
+          }
+        ]
+      },
+      {
+        serialNumber: 'SPC-004-2024',
+        projectId: 'PROJ-TEST-002',
+        integratorId: 'test@integrator.com',
+        productType: 'Solar Panel Controller',
+        status: 'Operational',
+        faultHistory: [
+          {
+            faultType: 'Battery Charging Issue',
+            description: 'Battery not reaching full charge',
+            reportedDate: new Date('2023-12-20'),
+            resolvedDate: new Date('2023-12-22'),
+            status: 'Resolved'
+          }
+        ]
+      },
+      {
+        serialNumber: 'BC-005-2024',
+        projectId: 'PROJ-TEST-002',
+        integratorId: 'test@integrator.com',
+        productType: 'Battery Charger',
+        status: 'Replaced',
+        faultHistory: [
+          {
+            faultType: 'Hardware Failure',
+            description: 'Internal component failure requiring replacement',
+            reportedDate: new Date('2024-01-05'),
+            resolvedDate: new Date('2024-01-10'),
+            status: 'Resolved'
+          }
+        ]
+      }
+    ];
+
+    await Device.insertMany(sampleDevices);
+
+    // Update project device counts
+    for (const project of sampleProjects) {
+      const deviceCount = await Device.countDocuments({ projectId: project.projectId });
+      const openRequests = await Device.aggregate([
+        { $match: { projectId: project.projectId } },
+        { $unwind: '$faultHistory' },
+        { $match: { 'faultHistory.status': { $ne: 'Resolved' } } },
+        { $count: 'openFaults' }
+      ]);
+
+      await Project.findOneAndUpdate(
+        { projectId: project.projectId },
+        {
+          numberOfDevices: deviceCount,
+          openRequests: openRequests.length > 0 ? openRequests[0].openFaults : 0
+        }
+      );
+    }
+
+    console.log('Sample data seeded successfully!');
+    console.log('Test integrator email: test@integrator.com');
+
+  } catch (error) {
+    console.error('Error seeding sample data:', error);
+  }
+}
+
+app.listen(PORT || 3000, async () => {
+  console.log(`Server running on port ${PORT || 3000}`);
+
+  // Seed sample data in development
+  if (process.env.NODE_ENV !== 'production') {
+    await seedSampleData();
+  }
+});

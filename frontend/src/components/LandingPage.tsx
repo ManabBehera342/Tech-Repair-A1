@@ -75,6 +75,10 @@ const LandingPage: React.FC = () => {
       
       if (formData.role === 'service_team' || formData.role === 'epr_team') {
         navigate('/dashboard');
+      } else if (formData.role === 'channel_partner') {
+        navigate('/partner-dashboard');
+      } else if (formData.role === 'system_integrator') {
+        navigate('/integrator-dashboard');
       } else {
         navigate('/service-request');
       }

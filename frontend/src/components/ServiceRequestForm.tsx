@@ -179,6 +179,7 @@ const ServiceRequestForm: React.FC = () => {
       const token = localStorage.getItem('token');
       const reqBody = {
         customerName: formData.contactDetails.name,
+        customerEmail: formData.contactDetails.email,
         serialNumber: formData.productDetails.serialNumber,
         productDetails: `${formData.productDetails.type} ${formData.productDetails.model}`,
         purchaseDate: formData.productDetails.purchaseDate,
